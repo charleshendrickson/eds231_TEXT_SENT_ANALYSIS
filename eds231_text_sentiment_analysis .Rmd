@@ -1,0 +1,184 @@
+---
+title: "eds231_text_sentiment_analysis"
+author: "Charles Hendrickson"
+date: "4/15/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+# Load packages 
+library(tidyr) #text analysis in R
+library(lubridate) #working with date data
+library(pdftools) #read in pdfs
+library(tidyverse)
+library(tidytext)
+library(here)
+library(LexisNexisTools) #Nexis Uni data wrangling
+library(sentimentr)
+library(readr)
+library(textreadr) #Read in .docx content
+```
+
+## Part 1
+Using the “IPCC” Nexis Uni data set from the class presentation and the pseudo code we discussed, recreate Figure 1A from Froelich et al. (Date x # of 1) positive, 2) negative, 3) neutral headlines):
+
+Introduction to the Nexis Uni data source
+```{r}
+#to follow along with this example, download this .docx to your working directory: 
+#https://github.com/MaRo406/EDS_231-text-sentiment/blob/main/nexis_dat/Nexis_IPCC_Results.docx
+
+# Specify URL where file is stored 
+#IPCC_url <- "https://github.com/MaRo406/EDS_231-text-sentiment/blob/main/nexis_dat/Nexis_IPCC_Results.docx"
+
+# Specify destination where file should be saved
+#destfile <- "data/IPCC.docx"
+
+# Download file to destination
+#download.file(IPCC_url, destfile)
+
+
+#my_files <- list.files(pattern = ".docx", path = getwd(),
+                       #full.names = TRUE, recursive = TRUE, ignore.case = TRUE)
+
+dat <- lnt_read("data/Nexis_IPCC_Results.docx") #Object of class 'LNT output'
+
+
+meta_df <- dat@meta
+articles_df <- dat@articles
+paragraphs_df <- dat@paragraphs
+
+dat2<- data_frame(element_id = seq(1:length(meta_df$Headline)), Date = meta_df$Date, Headline = meta_df$Headline)
+
+#May be of use for assignment: using the full text from the articles
+# paragraphs_dat <- data_frame(element_id = paragraphs_df$Art_ID, Text  = paragraphs_df$Paragraph)
+# 
+# dat3 <- inner_join(dat2,paragraphs_dat, by = "element_id")
+
+#can we create a similar graph to Figure 1A from Froelich et al.? 
+mytext <- get_sentences(dat2$Headline)
+sent <- sentiment(mytext)
+
+sent_df <- inner_join(dat2, sent, by = "element_id")
+
+sentiment <- sentiment_by(sent_df$Headline)
+
+sent_df %>%
+  arrange(sentiment)
+```
+
+
+```{r}
+# Make new columns for 'positive', 'negative', and 'neutral' sentiments 
+
+sent_new <- sent_df %>% 
+  mutate(sentiment_category = case_when(sentiment > 0 ~ "positive",
+                                        sentiment < 0 ~ "negative",
+                                        sentiment == 0 ~ "neutral")) %>%
+           group_by(Date, sentiment_category) %>% 
+           summarise(headline_count = n()) #number of headlines per date and sentiment category
+```
+
+
+```{r}
+# Plot sentiments 
+ggplot(data = sent_new, aes(x = Date, y = headline_count, color = sentiment_category)) +
+  geom_line() +
+  scale_color_manual(values = c("red", "grey", "blue")) +
+  labs(title = "Sentiment Analysis: IPCC Nexis Uni Data",
+       x = "Date",
+       y = "Developed Media Sentiment (No. Headlines)") +
+  theme_classic() +
+  theme(legend.background = element_blank())
+
+```
+
+
+## Part 2
+Access the Nexis Uni database through the UCSB library: https://www.library.ucsb.edu/research/db/211
+
+Choose a key search term or terms to define a set of articles.
+
+Use your search term along with appropriate filters to obtain and download a batch of at least 100 full text search results (.docx).
+
+Read your Nexis article document into RStudio.
+
+This time use the full text of the articles for the analysis. First clean any artifacts of the data collection process (hint: this type of thing should be removed: “Apr 04, 2022( Biofuels Digest: http://www.biofuelsdigest.com/ Delivered by Newstex”))
+
+Explore your data a bit and try to replicate some of the analyses above presented in class if you’d like (not necessary).
+
+Plot the amount of emotion words (the 8 from nrc) as a percentage of all the emotion words used each day (aggregate text from articles published on the same day). How does the distribution of emotion words change over time? Can you think of any reason this would be the case?
+
+```{r}
+# Read in Nexis article document 
+nexis_data <- read_docx("data/Files(100).DOCX")
+```
+
+
+```{r}
+# Make a data frame
+nexis_df <- data.frame(text = nexis_data) %>% #create 1-column df with 'text' variable
+  mutate(page = 1:n()) #add a page number variable, 'page'
+
+#examine the beginning of the data frame
+nexis_text <- nexis_df %>%
+  filter(page %in% 8:41)%>%
+  mutate(text = str_split(text, '\n')) %>% #this splits by page. 
+  unnest(text) %>%  #this splits by line
+  mutate(line = str_to_lower(text)) #and convert to all lower case
+
+#write_csv(nexis_text, "data/nexis_text.csv")
+```
+
+Use the Bing sentiment analysis lexicon.
+```{r}
+# Word and sentiment 
+bing_sent <- get_sentiments('bing') #grab the bing sentiment lexicon from tidytext
+```
+
+Here is the starting point for reading in the data as a .csv. We need to unnest the text to the word level so we can label the individual sentiment words. Let’s also remove stop words as standard text cleaning procedure. Note: Not every English word is in the lexicons because many English words are pretty neutral.
+```{r}
+nexis_text <- read_csv('data/nexis_text.csv')
+
+#unnest to word-level tokens, remove stop words, and join sentiment words
+ text_words <- nexis_text  %>%
+  unnest_tokens(output = word, input = text, token = 'words')
+ 
+ sent_words <- text_words%>% #break text into individual words
+  anti_join(stop_words, by = 'word') %>% #returns only the rows without stop words
+  inner_join(bing_sent, by = 'word') #joins and retains only sentiment words
+```
+
+
+```{r}
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

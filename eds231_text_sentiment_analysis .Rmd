@@ -1,12 +1,14 @@
 ---
 title: "eds231_text_sentiment_analysis"
 author: "Charles Hendrickson"
-date: "4/15/2022"
-output: html_document
+date: "04/19/2022"
+output:
+  pdf_document: default
+  html_document: default
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
 ```
 
 
@@ -22,6 +24,8 @@ library(LexisNexisTools) #Nexis Uni data wrangling
 library(sentimentr)
 library(readr)
 library(textreadr) #Read in .docx content
+library(janitor)
+library(textdata)
 ```
 
 ## Part 1
@@ -113,62 +117,99 @@ Explore your data a bit and try to replicate some of the analyses above presente
 
 Plot the amount of emotion words (the 8 from nrc) as a percentage of all the emotion words used each day (aggregate text from articles published on the same day). How does the distribution of emotion words change over time? Can you think of any reason this would be the case?
 
-```{r}
-# Read in Nexis article document 
-nexis_data <- read_docx("data/Files(100).DOCX")
-```
-
 
 ```{r}
-# Make a data frame
-nexis_df <- data.frame(text = nexis_data) %>% #create 1-column df with 'text' variable
-  mutate(page = 1:n()) #add a page number variable, 'page'
+my_files <- list.files(pattern = ".docx", path = getwd(),
+                       full.names = TRUE, recursive = TRUE, ignore.case = TRUE)
 
-#examine the beginning of the data frame
-nexis_text <- nexis_df %>%
-  filter(page %in% 8:41)%>%
-  mutate(text = str_split(text, '\n')) %>% #this splits by page. 
-  unnest(text) %>%  #this splits by line
-  mutate(line = str_to_lower(text)) #and convert to all lower case
+#read in data
+dat <- lnt_read(my_files) #Object of class 'LNT output'
 
-#write_csv(nexis_text, "data/nexis_text.csv")
-```
+#view meta data, articles, and paragraphs 
+meta_df <- dat@meta
+articles_df <- dat@articles
+paragraphs_df <- dat@paragraphs
 
-Use the Bing sentiment analysis lexicon.
-```{r}
-# Word and sentiment 
-bing_sent <- get_sentiments('bing') #grab the bing sentiment lexicon from tidytext
-```
+dat2<- data_frame(element_id = seq(1:length(meta_df$Headline)), Date = meta_df$Date, Headline = meta_df$Headline)
 
-Here is the starting point for reading in the data as a .csv. We need to unnest the text to the word level so we can label the individual sentiment words. Let’s also remove stop words as standard text cleaning procedure. Note: Not every English word is in the lexicons because many English words are pretty neutral.
-```{r}
-nexis_text <- read_csv('data/nexis_text.csv')
+#May be of use for assignment: using the full text from the articles
+paragraphs_dat <- data_frame(element_id = paragraphs_df$Art_ID, Text  = paragraphs_df$Paragraph)
 
-#unnest to word-level tokens, remove stop words, and join sentiment words
- text_words <- nexis_text  %>%
-  unnest_tokens(output = word, input = text, token = 'words')
- 
- sent_words <- text_words%>% #break text into individual words
-  anti_join(stop_words, by = 'word') %>% #returns only the rows without stop words
-  inner_join(bing_sent, by = 'word') #joins and retains only sentiment words
-```
-
-
-```{r}
+dat3 <- inner_join(dat2,paragraphs_dat, by = "element_id") %>% clean_names() #Clean the variable names
 
 ```
 
 
+First clean any artifacts of the data collection process (hint: this type of thing should be removed: “Apr 04, 2022( Biofuels Digest: http://www.biofuelsdigest.com/ Delivered by Newstex”))
+```{r}
+#Remove lines that contain 'http' from text rows
+dat3_clean <- dat3[!grepl("http", dat3$text),] #grepl finds a pattern in string or string vector
+
+#Remove lines that contain 'n#' from text rows
+patterns1 <- c("n6", "n7", "n8", "n9", "n10")
+
+dat3_clean <- dat3_clean[!grepl(paste(patterns1, collapse = "|"), dat3_clean$text),] #grepl finds a pattern in string or string vector
+
+```
 
 
+Plot the amount of emotion words (the 8 from nrc) as a percentage of all the emotion words used each day (aggregate text from articles published on the same day). 
+```{r}
+nrc_sent <- get_sentiments('nrc') #requires downloading a large dataset via prompt
+
+```
+
+```{r}
+nrc_word_counts <- dat3_clean %>%
+  unnest_tokens(output = word, input = text, token = 'words') %>% 
+  inner_join(get_sentiments("nrc")) %>%
+  count(word, sentiment, date, sort = TRUE) %>%
+  ungroup()
+```
+
+```{r}
+nrc_word_counts %>%
+  group_by(sentiment) %>%
+  filter(sentiment != "positive" & sentiment != "negative") %>% 
+  slice_max(n, n = 10) %>% 
+  ungroup() %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(n, word, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~sentiment, scales = "free_y") +
+  labs(x = "Contribution to sentiment",
+       y = NULL)
+```
 
 
+```{r}
+nrc_word_counts_new <- nrc_word_counts %>%
+  filter(sentiment != "positive" & sentiment != "negative") %>% 
+  group_by(date, sentiment)%>% 
+  count(sentiment) %>% 
+  ungroup() %>%
+  group_by(date) %>% 
+  mutate(total_n = sum(n), percentage = 100*(n/total_n))
+```
+
+Percentage of Sentiment Words 
+```{r}
+ggplot(data = nrc_word_counts_new, aes(x = date, y = percentage, color = sentiment)) + 
+  geom_smooth(se = FALSE) + 
+  theme_classic() + 
+  labs(x = "Date", 
+       y = "Percentage of Sentiment", 
+       color = "Sentiment", 
+       title = "Sentiment Analysis of Criminalization of Indigenous Fishing Practices") 
+```
 
 
+**I was expecting anger, sadness, fear, and disgust to continually and steadily increase in the percentage of sentiment because the criminalization of indigenous fishing practices is much a sensitive and controversial topic. However, these sentiments peaked around 2019 and then steadily decreased around 2020 to a local minimum in mid 2021. They then increased again in 2022.**
+
+**Interestingly, the sentiments of trust, anticipation, and joy had the exact opposite percentages. Instead, they declined around 2019 and then steadily increased around 2020 to a local maximum in mid 2021. They then decreased again in 2022. 'Surprise' peaked around 2016, slowly decreased and then increased again in 2022.**
 
 
-
-
+**A possible explanation for why generally negative sentiments peaked in 2019 and then decreased to a minimum in 2021 could be a change in fishing management or law enforcement policies in 2021, which possibly led to the decriminalized indigenous fishing practices. This makes sense because negative sentiments about this subject in the media would likely peak before enough support could be built to change policies in 2021, at which point negative sentiments would decrease to a minimum and positive sentiments about the policy change would increase.**
 
 
 
